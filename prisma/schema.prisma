@@ -1,0 +1,2823 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== AUTHENTICATION & USER MANAGEMENT ====================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String     @id @default(cuid())
+  userId        Int        @unique @default(autoincrement())
+  name          String
+  firstName     String
+  lastName      String
+  phone         String?    @unique
+  email         String     @unique
+  emailVerified Boolean    @default(false)
+  password      String?
+  imageUrl      String?
+  role          UserRole   @default(CARETAKER)
+  status        UserStatus @default(ACTIVE)
+  token         String?
+
+  // Location
+  address  String?
+  district String?
+  city     String?
+
+  // Professional details (for Vets)
+  licenseNumber     String?
+  specialization    String?
+  yearsOfExperience Int?
+
+  // Preferences
+  preferredLanguage    String  @default("en")
+  notificationsEnabled Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Auth Relations
+  accounts      Account[]
+  sessions      Session[]
+  resetTokens   PasswordResetToken[]
+  refreshTokens RefreshToken[]
+
+  // Farmer Relations
+  ownedFarms Farm[] @relation("FarmOwner")
+
+  // Shared Relations
+  farmMemberships         FarmMember[]
+  recordedHealthLogs      HealthRecord[]          @relation("HealthRecordedBy")
+  recordedWeights         WeightRecord[]          @relation("WeightRecordedBy")
+  recordedFeedings        DailyFeedingLog[]       @relation("FeedingRecordedBy")
+  recordedProduction      ProductionRecord[]      @relation("ProductionRecordedBy")
+  recordedObservations    DailyObservation[]      @relation("ObservationRecordedBy")
+  recordedActivities      DailyActivityLog[]      @relation("ActivityRecordedBy")
+  recordedConsumption     FeedConsumptionLog[]    @relation("ConsumptionRecordedBy")
+  recordedBodyExams       BodyPartExamination[]   @relation("ExamRecordedBy")
+  recordedWeatherResponse AnimalWeatherResponse[] @relation("WeatherResponseRecordedBy")
+  completedTasks          Task[]                  @relation("TaskCompletedBy")
+  assignedTasks           Task[]                  @relation("TaskAssignedTo")
+  receivedAlerts          Alert[]
+  activities              ActivityLog[]
+  notifications           Notification[]
+
+  @@index([role])
+  @@index([status])
+  @@index([email])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  FARMER
+  VETERINARIAN
+  CARETAKER
+  OBSERVER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ==================== FARM MANAGEMENT ====================
+
+model Farm {
+  id     String @id @default(cuid())
+  farmId Int    @unique @default(autoincrement())
+  slug   String @unique
+  // Basic Information
+  name        String
+  description String? @db.Text
+
+  // Farm Type & Category
+  farmType       FarmType
+  farmCategories FarmCategory[]
+
+  // Location
+  address     String?
+  district    String
+  city        String?
+  village     String?
+  subcounty   String?
+  parish      String?
+  landmark    String?
+  latitude    Float?
+  longitude   Float?
+  mapUrl      String?
+  sizeInAcres Float?
+
+  // Ownership
+  ownerId String
+  owner   User   @relation("FarmOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Grazing System
+  grazingType GrazingType @default(SEMI_ZERO)
+
+  // Climate & Environment
+  climateZone      String?
+  averageRainfall  Float?
+  altitude         Float?
+  temperatureRange String?
+
+  // Infrastructure
+  paddockCount     Int      @default(0)
+  waterSources     String[]
+  shelterType      String?
+  fencingType      String?
+  hasQuarantine    Boolean  @default(false)
+  hasMilkingParlor Boolean  @default(false)
+  hasLoadingRamp   Boolean  @default(false)
+  hasColdStorage   Boolean  @default(false)
+
+  // Status
+  status   FarmStatus @default(ACTIVE)
+  isActive Boolean    @default(true)
+
+  // Subscription
+  subscriptionTier  SubscriptionTier @default(FREE)
+  subscriptionEnd   DateTime?
+  maxAnimalsAllowed Int              @default(20)
+
+  // Stats (auto-calculated)
+  totalAnimals Int @default(0)
+  totalCattle  Int @default(0)
+  totalGoats   Int @default(0)
+  totalSheep   Int @default(0)
+  totalPigs    Int @default(0)
+  totalPoultry Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  members               FarmMember[]
+  animals               Animal[]
+  paddocks              Paddock[]
+  feedInventory         FeedInventory[]
+  medicineInventory     MedicineInventory[]
+  healthRecords         HealthRecord[]
+  weightRecords         WeightRecord[]
+  dailyFeedingLogs      DailyFeedingLog[]
+  feedConsumptionLogs   FeedConsumptionLog[]
+  dailyObservations     DailyObservation[]
+  dailyActivityLogs     DailyActivityLog[]
+  productionRecords     ProductionRecord[]
+  breedingRecords       BreedingRecord[]
+  financialTransactions FinancialTransaction[]
+  tasks                 Task[]
+  alerts                Alert[]
+  aiInsights            AIInsight[]
+  feedingSchedules      FeedingSchedule[]
+  vaccinationSchedules  VaccinationSchedule[]
+  milkQualityTests      MilkQualityTest[]
+  herdHealthSummaries   HerdHealthSummary[]
+  feedQualityTests      FeedQualityTest[]
+  mortalityRecords      MortalityRecord[]
+  reproductionSummaries ReproductionSummary[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([district])
+  @@index([farmType])
+}
+
+enum FarmType {
+  COMMERCIAL
+  SMALL_SCALE
+  MIXED
+  SPECIALIZED
+}
+
+enum FarmCategory {
+  DAIRY
+  BEEF
+  BREEDING
+  FATTENING
+  MIXED
+}
+
+enum GrazingType {
+  FREE_RANGE
+  PADDOCK_GRAZING
+  ZERO_GRAZING
+  SEMI_ZERO
+}
+
+enum FarmStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum SubscriptionTier {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+// ==================== FARM MEMBERS ====================
+
+model FarmMember {
+  id     String @id @default(cuid())
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role        FarmMemberRole
+  permissions String[]
+
+  specialty String?
+
+  assignedPaddocks String[]
+  assignedAnimals  String[]
+
+  invitedAt  DateTime     @default(now())
+  acceptedAt DateTime?
+  status     MemberStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([farmId, userId])
+  @@index([farmId])
+  @@index([userId])
+  @@index([role])
+}
+
+enum FarmMemberRole {
+  OWNER
+  MANAGER
+  VETERINARIAN
+  CARETAKER
+  OBSERVER
+}
+
+enum MemberStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+  REMOVED
+}
+
+// ==================== PADDOCK MANAGEMENT ====================
+
+model Paddock {
+  id        String @id @default(cuid())
+  paddockId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  name        String
+  number      String?
+  sizeInAcres Float?
+
+  // Pasture details
+  grassType     String?
+  grassHeight   Float?
+  soilCondition String?
+  lastSoilTest  DateTime?
+
+  // Usage tracking
+  isOccupied       Boolean   @default(false)
+  currentAnimalIds String[]
+  lastGrazedDate   DateTime?
+  nextGrazingDate  DateTime?
+  recommendedRest  Int?      @default(21)
+
+  // Facilities
+  hasWaterSource Boolean @default(false)
+  hasShelter     Boolean @default(false)
+  hasSaltLick    Boolean @default(false)
+  hasMineralLick Boolean @default(false)
+
+  // Maintenance
+  lastMaintenance  DateTime?
+  maintenanceNotes String?   @db.Text
+
+  status PaddockStatus @default(AVAILABLE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  grazingHistory   GrazingHistory[]
+  pastureSoilTests PastureSoilTest[]
+
+  @@index([farmId])
+  @@index([status])
+}
+
+enum PaddockStatus {
+  AVAILABLE
+  IN_USE
+  RESTING
+  MAINTENANCE
+}
+
+model GrazingHistory {
+  id String @id @default(cuid())
+
+  paddockId String
+  paddock   Paddock @relation(fields: [paddockId], references: [id], onDelete: Cascade)
+
+  animalIds    String[]
+  startDate    DateTime
+  endDate      DateTime?
+  durationDays Int?
+
+  grassConditionBefore String?
+  grassConditionAfter  String?
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([paddockId])
+  @@index([startDate])
+}
+
+// ==================== SOIL & PASTURE ANALYSIS ====================
+
+model PastureSoilTest {
+  id     String @id @default(cuid())
+  testId Int    @unique @default(autoincrement())
+
+  paddockId String
+  paddock   Paddock @relation(fields: [paddockId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  // Soil properties
+  pH            Float
+  organicMatter Float?
+  nitrogen      Float?
+  phosphorus    Float?
+  potassium     Float?
+  calcium       Float?
+  magnesium     Float?
+
+  // Soil texture
+  sandPercentage Float?
+  siltPercentage Float?
+  clayPercentage Float?
+
+  // Recommendations
+  limeRequired     Float?
+  fertilizerNeeded String?
+
+  // Pasture biomass
+  grassYield           Float?
+  grassHeight          Float?
+  botanicalComposition Json?
+
+  testedBy       String?
+  laboratoryName String?
+  testCost       Float?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([paddockId])
+  @@index([date])
+}
+
+// ==================== ANIMAL MANAGEMENT ====================
+
+model Animal {
+  id       String @id @default(cuid())
+  animalId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  // Identification
+  tagNumber String  @unique
+  name      String?
+  rfidTag   String?
+  qrCode    String?
+
+  // Category & Breed
+  category AnimalCategory
+  breed    String
+  subBreed String?
+
+  // Basic Info
+  sex             AnimalSex
+  dateOfBirth     DateTime?
+  approximateAge  String?
+  acquisitionDate DateTime        @default(now())
+  acquisitionType AcquisitionType
+  acquisitionCost Float?
+  purchaseWeight  Float?
+
+  // Parentage
+  motherTagNumber  String?
+  fatherTagNumber  String?
+  generationNumber Int?    @default(1)
+
+  // Physical Attributes
+  color    String?
+  markings String?
+  hornType String?
+
+  // Current Status
+  currentStatus  AnimalStatus @default(ACTIVE)
+  currentWeight  Float?
+  lastWeightDate DateTime?
+
+  // Health Score (AI-calculated)
+  healthScore     Float?    @default(100)
+  lastHealthCheck DateTime?
+
+  // Location
+  currentPaddock  String?
+  currentLocation String?
+
+  // Purpose/Classification
+  primaryPurpose     AnimalPurpose
+  secondaryPurposes  AnimalPurpose[]
+  productionStage    ProductionStage?
+  expectedProduction String?
+
+  // For Breeding Stock
+  isBreedingStock Boolean @default(false)
+  breedingValue   Float?
+
+  // For Dairy Animals
+  expectedMilkYield Float?
+  averageMilkYield  Float?
+  peakMilkYield     Float?
+  lactationNumber   Int?
+  daysInMilk        Int?
+
+  // For Meat/Fattening
+  targetWeight        Float?
+  targetMarketDate    DateTime?
+  expectedMaturityAge Int?
+
+  // Photos & Documentation
+  photos    String[]
+  documents String[]
+
+  // Assignment
+  assignedCaretakerId String?
+
+  // Pregnancy tracking
+  isPregnant       Boolean   @default(false)
+  breedingDate     DateTime?
+  expectedDelivery DateTime?
+  gestationDays    Int?
+  pregnancyNumber  Int?
+
+  // Performance Metrics (AI-calculated)
+  averageDailyGain         Float?
+  feedConversionRatio      Float?
+  overallProductivityScore Float?
+  profitabilityScore       Float?
+
+  // Disposal tracking
+  disposalDate   DateTime?
+  disposalType   DisposalType?
+  disposalReason String?
+  salePrice      Float?
+  carcassWeight  Float?
+  buyerName      String?
+  buyerContact   String?
+
+  // Notes
+  notes         String? @db.Text
+  behaviorNotes String? @db.Text
+  specialNeeds  String?
+
+  // AI Predictions
+  predictedMarketDate     DateTime?
+  predictedMaturityWeight Float?
+  diseaseRiskScore        Float?
+  reproductionScore       Float?
+  nextHealthCheckDate     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  healthRecords          HealthRecord[]
+  weightRecords          WeightRecord[]
+  dailyFeedingLogs       DailyFeedingLog[]
+  feedConsumptionLogs    FeedConsumptionLog[]
+  dailyObservations      DailyObservation[]
+  dailyActivityLogs      DailyActivityLog[]
+  productionRecords      ProductionRecord[]
+  breedingsAsMother      BreedingRecord[]        @relation("MotherAnimal")
+  breedingsAsFather      BreedingRecord[]        @relation("FatherAnimal")
+  offspring              BreedingRecord[]        @relation("OffspringAnimal")
+  behaviorRecords        BehaviorRecord[]
+  environmentalLogs      EnvironmentalLog[]
+  symptomLogs            SymptomLog[]
+  medicationLogs         MedicationLog[]
+  waterConsumptionLogs   WaterConsumptionLog[]
+  milkQualityTests       MilkQualityTest[]
+  bodyPartExaminations   BodyPartExamination[]
+  animalWeatherResponses AnimalWeatherResponse[]
+  animalBaseline         AnimalBaseline?
+  slaughterRecord        SlaughterRecord?
+  reproductionSummary    ReproductionSummary?
+
+  @@index([farmId])
+  @@index([category])
+  @@index([currentStatus])
+  @@index([tagNumber])
+  @@index([primaryPurpose])
+  @@index([acquisitionDate])
+}
+
+enum AnimalCategory {
+  CATTLE
+  GOAT
+  SHEEP
+  PIG
+  POULTRY
+  RABBIT
+  OTHER
+}
+
+enum AnimalSex {
+  MALE
+  FEMALE
+  CASTRATED
+}
+
+enum AcquisitionType {
+  BORN_ON_FARM
+  PURCHASED
+  GIFTED
+  INHERITED
+  TRANSFERRED
+}
+
+enum AnimalStatus {
+  ACTIVE
+  SICK
+  QUARANTINE
+  PREGNANT
+  LACTATING
+  DRY
+  SOLD
+  DECEASED
+  STOLEN
+  TRANSFERRED
+}
+
+enum AnimalPurpose {
+  DAIRY
+  BEEF
+  BREEDING
+  FATTENING
+  DUAL_PURPOSE
+  WORK
+  SHOW
+  PETS
+}
+
+enum ProductionStage {
+  CALF
+  HEIFER
+  BULL
+  STEER
+  COW
+  OX
+  KID
+  DOE
+  BUCK
+  LAMB
+  EWE
+  RAM
+  PIGLET
+  SOW
+  BOAR
+  CHICK
+  HEN
+  ROOSTER
+}
+
+enum DisposalType {
+  SOLD
+  SLAUGHTERED
+  DIED_NATURAL
+  DIED_DISEASE
+  DIED_ACCIDENT
+  STOLEN
+  GIFTED
+  TRANSFERRED
+  CULLED
+}
+
+// ==================== ANIMAL BASELINE (CRITICAL FOR AI) ====================
+
+model AnimalBaseline {
+  id String @id @default(cuid())
+
+  animalId String @unique
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  // Calculated from historical data (last 30 days)
+  baselineWeight          Float
+  baselineDailyGain       Float
+  baselineFeedIntake      Float
+  baselineMilkYield       Float?
+  baselineWaterIntake     Float
+  baselineTemperature     Float
+  baselineRespirationRate Int
+  baselineHeartRate       Int
+
+  // Behavioral baselines
+  baselineActivityLevel Float
+  baselineGrazingHours  Float
+  baselineRestingHours  Float
+
+  // Normal ranges
+  weightRangeMin    Float
+  weightRangeMax    Float
+  milkYieldRangeMin Float?
+  milkYieldRangeMax Float?
+
+  // Last calculated
+  calculatedAt DateTime @default(now())
+
+  // Data points used
+  dataPoints Int
+
+  @@index([animalId])
+  @@index([calculatedAt])
+}
+
+// ==================== DAILY FEEDING LOG ====================
+
+model DailyFeedingLog {
+  id    String @id @default(cuid())
+  logId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+  time String
+
+  // Can track individual or group
+  animalId        String?
+  animal          Animal?         @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  animalCategory  AnimalCategory?
+  groupIdentifier String?
+  animalCount     Int?            @default(1)
+
+  feedingType FeedingType
+
+  // Concentrate Feed
+  concentrateName     String?
+  concentrateQuantity Float?
+  concentrateProtein  Float?
+  concentrateEnergy   Float?
+
+  // Roughage
+  roughageName     String?
+  roughageQuantity Float?
+  roughageQuality  RoughageQuality?
+
+  // Fresh Pasture/Grazing
+  grazingDuration Float?
+  grazingPaddock  String?
+  grazingQuality  GrazingQuality?
+  estimatedIntake Float?
+
+  // Supplements & Additives
+  mineralSupplement String?
+  mineralQuantity   Float?
+  vitamins          String[]
+  otherSupplements  String[]
+
+  // Water Consumption
+  waterConsumed Float?
+
+  // Feeding Behavior Observation
+  appetite         AppetiteLevel @default(NORMAL)
+  feedRefused      Boolean       @default(false)
+  refusedAmount    Float?
+  feedingTime      Int?
+  competitionLevel String?
+
+  // Environmental Context
+  temperature Float?
+  weather     String?
+
+  // Special Notes
+  feedChanges       String?
+  adverseReactions  String?
+  medicationsInFeed String[]
+
+  // Cost Tracking
+  concentrateCost Float?
+  roughageCost    Float?
+  supplementCost  Float?
+  totalCost       Float?
+
+  recordedBy     String
+  recordedByUser User   @relation("FeedingRecordedBy", fields: [recordedBy], references: [id])
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  consumptionLogs FeedConsumptionLog[]
+
+  @@index([farmId])
+  @@index([animalId])
+  @@index([date])
+  @@index([feedingType])
+  @@index([animalCategory])
+}
+
+enum FeedingType {
+  MORNING
+  MIDDAY
+  EVENING
+  NIGHT
+  CONTINUOUS
+}
+
+enum RoughageQuality {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+}
+
+enum GrazingQuality {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+}
+
+enum AppetiteLevel {
+  EXCELLENT
+  GOOD
+  NORMAL
+  REDUCED
+  POOR
+  REFUSED
+}
+
+// ==================== FEED CONSUMPTION LOG (CRITICAL) ====================
+
+model FeedConsumptionLog {
+  id    String @id @default(cuid())
+  logId Int    @unique @default(autoincrement())
+
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  // What was offered (from DailyFeedingLog)
+  feedingLogId    String
+  dailyFeedingLog DailyFeedingLog @relation(fields: [feedingLogId], references: [id], onDelete: Cascade)
+
+  // What was actually consumed
+  concentrateConsumed Float?
+  roughageConsumed    Float?
+
+  // What was wasted/refused
+  concentrateRefused Float?
+  roughageRefused    Float?
+  wastePercentage    Float?
+
+  // Consumption rate
+  timeToFinish Int?
+  eatingSpeed  EatingSpeed?
+
+  // Competition (for group feeding)
+  dominantEater Boolean?
+  pushedAway    Boolean?
+
+  recordedBy     String
+  recordedByUser User   @relation("ConsumptionRecordedBy", fields: [recordedBy], references: [id])
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([farmId])
+  @@index([animalId])
+  @@index([date])
+  @@index([feedingLogId])
+}
+
+enum EatingSpeed {
+  VERY_SLOW
+  SLOW
+  NORMAL
+  FAST
+  VERY_FAST
+}
+
+// ==================== FEEDING SCHEDULE ====================
+
+model FeedingSchedule {
+  id         String @id @default(cuid())
+  scheduleId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String? @db.Text
+
+  animalCategory  AnimalCategory?
+  animalPurpose   AnimalPurpose?
+  productionStage ProductionStage?
+  specificAnimals String[]
+
+  feedingTimes String[]
+
+  standardConcentrate Float?
+  standardRoughage    Float?
+  grazingHours        Float?
+
+  adjustForWeight     Boolean @default(true)
+  adjustForProduction Boolean @default(true)
+  adjustForWeather    Boolean @default(false)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([farmId])
+  @@index([animalCategory])
+}
+
+// ==================== DAILY OBSERVATION LOG ====================
+
+model DailyObservation {
+  id            String @id @default(cuid())
+  observationId Int    @unique @default(autoincrement())
+
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+  time String
+
+  // Physical Condition
+  bodyConditionScore Float?
+  coatCondition      CoatCondition?
+  eyeCondition       EyeCondition?
+  noseCondition      NoseCondition?
+  hoofCondition      HoofCondition?
+
+  // Vital Signs
+  temperature     Float?
+  respirationRate Int?
+  heartRate       Int?
+  rumenFill       RumenFill?
+
+  // Behavior
+  activityLevel   ActivityLevel @default(NORMAL)
+  alertness       Alertness     @default(ALERT)
+  socialization   Socialization @default(NORMAL)
+  vocalizations   String?
+  standingPosture String?
+  movementQuality String?
+
+  // Bodily Functions
+  urination        UrineObservation @default(NORMAL)
+  urineColor       String?
+  defecation       FecesObservation @default(NORMAL)
+  fecesConsistency String?
+  fecesColor       String?
+
+  // For Dairy Animals
+  udderCondition UdderCondition?
+  teatCondition  String?
+  milkLetdown    String?
+
+  // For Pregnant Animals
+  dischargeSeen   Boolean @default(false)
+  nestingBehavior Boolean @default(false)
+
+  // Environmental Interaction
+  shelterUsage  String?
+  waterAccess   Boolean @default(true)
+  saltLickUsage Boolean @default(false)
+
+  // Red Flags
+  concernsNoted  Boolean @default(false)
+  concernDetails String? @db.Text
+  requiresVet    Boolean @default(false)
+
+  recordedBy     String
+  recordedByUser User   @relation("ObservationRecordedBy", fields: [recordedBy], references: [id])
+
+  notes  String?  @db.Text
+  photos String[]
+
+  createdAt DateTime @default(now())
+
+  @@index([farmId])
+  @@index([animalId])
+  @@index([date])
+  @@index([concernsNoted])
+}
+
+enum CoatCondition {
+  SHINY_SMOOTH
+  NORMAL
+  DULL
+  ROUGH
+  MATTED
+}
+
+enum EyeCondition {
+  BRIGHT_CLEAR
+  NORMAL
+  DULL
+  DISCHARGE
+  SWOLLEN
+}
+
+enum NoseCondition {
+  MOIST_NORMAL
+  DRY
+  DISCHARGE
+  CRUSTY
+}
+
+enum HoofCondition {
+  EXCELLENT
+  GOOD
+  NEEDS_TRIMMING
+  CRACKED
+  INFECTED
+}
+
+enum RumenFill {
+  FULL
+  MODERATE
+  EMPTY
+}
+
+enum ActivityLevel {
+  VERY_ACTIVE
+  ACTIVE
+  NORMAL
+  SLUGGISH
+  LETHARGIC
+}
+
+enum Alertness {
+  VERY_ALERT
+  ALERT
+  NORMAL
+  DULL
+  UNRESPONSIVE
+}
+
+enum Socialization {
+  LEADING_GROUP
+  NORMAL
+  ISOLATED
+  AGGRESSIVE
+  FEARFUL
+}
+
+enum UrineObservation {
+  NORMAL
+  FREQUENT
+  INFREQUENT
+  STRAINING
+  BLOOD_PRESENT
+}
+
+enum FecesObservation {
+  NORMAL
+  LOOSE
+  DIARRHEA
+  CONSTIPATED
+  BLOOD_PRESENT
+  MUCUS_PRESENT
+}
+
+enum UdderCondition {
+  NORMAL
+  SLIGHTLY_SWOLLEN
+  SWOLLEN
+  HOT
+  HARD
+  ASYMMETRIC
+}
+
+// ==================== DAILY ACTIVITY LOG ====================
+
+model DailyActivityLog {
+  id         String @id @default(cuid())
+  activityId Int    @unique @default(autoincrement())
+
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  // Time-based activities
+  timeInShelter  Float?
+  timeGrazing    Float?
+  timeResting    Float?
+  timeStanding   Float?
+  timeLyingDown  Float?
+  timeEating     Float?
+  timeDrinking   Float?
+  timeRuminating Float?
+
+  // Movement tracking
+  distanceCovered Float?
+  stepsCount      Int?
+
+  // Interaction
+  interactionWithHerd   String?
+  interactionWithHumans String?
+
+  // Location changes
+  locationsVisited String[]
+  timePerLocation  Json?
+
+  // Special events
+  eventsDuringDay String[]
+
+  recordedBy     String
+  recordedByUser User   @relation("ActivityRecordedBy", fields: [recordedBy], references: [id])
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([farmId])
+  @@index([animalId])
+  @@index([date])
+}
+
+// ==================== BEHAVIOR RECORDS ====================
+
+model BehaviorRecord {
+  id       String @id @default(cuid())
+  recordId Int    @unique @default(autoincrement())
+
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date     DateTime         @default(now())
+  time     String
+  behavior BehaviorType
+  severity BehaviorSeverity @default(NORMAL)
+
+  description String  @db.Text
+  trigger     String?
+  context     String? @db.Text
+
+  actionTaken  String?
+  wasEffective Boolean?
+
+  isRecurring Boolean @default(false)
+  frequency   String?
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([animalId])
+  @@index([date])
+  @@index([behavior])
+}
+
+enum BehaviorType {
+  NORMAL_GRAZING
+  EXCESSIVE_GRAZING
+  AGGRESSION
+  MOUNTING
+  HEAT_SIGNS
+  RESTLESSNESS
+  VOCALIZATION
+  ISOLATION
+  PACING
+  HEAD_PRESSING
+  TAIL_SWISHING
+  EAR_POSITION_ABNORMAL
+  CIRCLING
+  STARGAZING
+  OTHER
+}
+
+enum BehaviorSeverity {
+  NORMAL
+  MILD_CONCERN
+  MODERATE_CONCERN
+  SEVERE_CONCERN
+}
+
+// ==================== ENVIRONMENTAL LOG ====================
+
+model EnvironmentalLog {
+  id    String @id @default(cuid())
+  logId Int    @unique @default(autoincrement())
+
+  animalId String?
+  animal   Animal? @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  // Weather
+  temperature Float
+  humidity    Float?
+  rainfall    Float?
+  windSpeed   Float?
+  weatherType WeatherType
+  heatIndex   Float?
+
+  // Barn/Shelter conditions
+  barnTemperature Float?
+  barnHumidity    Float?
+  ventilation     VentilationLevel?
+  lightingLevel   LightingLevel?
+  noiseLevel      NoiseLevel?
+
+  // Pasture conditions
+  grassAvailability GrassAvailability?
+  mudLevel          MudLevel?
+  shadeAvailability ShadeAvailability?
+
+  // Stress factors
+  stressFactors String[]
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([animalId])
+  @@index([date])
+}
+
+enum WeatherType {
+  SUNNY
+  PARTLY_CLOUDY
+  CLOUDY
+  RAINY
+  STORMY
+  WINDY
+  FOGGY
+}
+
+enum VentilationLevel {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+}
+
+enum LightingLevel {
+  BRIGHT
+  ADEQUATE
+  DIM
+  DARK
+}
+
+enum NoiseLevel {
+  QUIET
+  NORMAL
+  LOUD
+  VERY_LOUD
+}
+
+enum GrassAvailability {
+  ABUNDANT
+  ADEQUATE
+  LIMITED
+  SPARSE
+}
+
+enum MudLevel {
+  DRY
+  SLIGHT
+  MODERATE
+  MUDDY
+  VERY_MUDDY
+}
+
+enum ShadeAvailability {
+  ABUNDANT
+  ADEQUATE
+  LIMITED
+  NONE
+}
+
+// ==================== ANIMAL WEATHER RESPONSE ====================
+
+model AnimalWeatherResponse {
+  id String @id @default(cuid())
+
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  // Weather conditions
+  temperature Float
+  humidity    Float?
+  heatIndex   Float?
+
+  // Animal response
+  respirationRate      Int?
+  shadeSeekingBehavior Boolean          @default(false)
+  reducedActivity      Boolean          @default(false)
+  reducedFeedIntake    Boolean          @default(false)
+  increasedWaterIntake Boolean          @default(false)
+  heatStressLevel      HeatStressLevel?
+
+  // Cold stress indicators
+  shivering Boolean @default(false)
+  huddling  Boolean @default(false)
+
+  // Production impact
+  milkYieldImpact Float?
+
+  recordedBy     String
+  recordedByUser User   @relation("WeatherResponseRecordedBy", fields: [recordedBy], references: [id])
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([animalId])
+  @@index([date])
+}
+
+enum HeatStressLevel {
+  NONE
+  MILD
+  MODERATE
+  SEVERE
+}
+
+// ==================== SYMPTOM LOG ====================
+
+model SymptomLog {
+  id        String @id @default(cuid())
+  symptomId Int    @unique @default(autoincrement())
+
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date     DateTime        @default(now())
+  time     String
+  symptom  String
+  severity SymptomSeverity @default(MILD)
+
+  duration    String?
+  frequency   String?
+  description String? @db.Text
+
+  bodyPart String?
+
+  triggeredBy   String?
+  relievedBy    String?
+  otherSymptoms String[]
+
+  resolved   Boolean   @default(false)
+  resolvedAt DateTime?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([animalId])
+  @@index([date])
+  @@index([symptom])
+  @@index([resolved])
+}
+
+enum SymptomSeverity {
+  MILD
+  MODERATE
+  SEVERE
+  CRITICAL
+}
+
+// ==================== MEDICATION LOG ====================
+
+model MedicationLog {
+  id    String @id @default(cuid())
+  logId Int    @unique @default(autoincrement())
+
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+  time String
+
+  medicationName String
+  medicationType MedicationType
+  dosage         String
+  route          RouteOfAdministration
+  frequency      String
+  duration       String?
+
+  reason        String
+  diagnosisCode String?
+
+  administeredBy String
+  batchNumber    String?
+  expiryDate     DateTime?
+
+  meatWithdrawal Int?
+  milkWithdrawal Int?
+
+  animalResponse String?
+  sideEffects    String[]
+
+  cost Float?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([animalId])
+  @@index([date])
+  @@index([medicationType])
+}
+
+enum MedicationType {
+  ANTIBIOTIC
+  ANTI_INFLAMMATORY
+  ANALGESIC
+  ANTIPARASITIC
+  VACCINE
+  VITAMIN
+  MINERAL
+  HORMONE
+  OTHER
+}
+
+enum RouteOfAdministration {
+  ORAL
+  INJECTION_IM
+  INJECTION_IV
+  INJECTION_SC
+  TOPICAL
+  EYE_DROPS
+  INTRANASAL
+  FEED_ADDITIVE
+  WATER_ADDITIVE
+}
+
+// ==================== WATER CONSUMPTION LOG ====================
+
+model WaterConsumptionLog {
+  id    String @id @default(cuid())
+  logId Int    @unique @default(autoincrement())
+
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  estimatedVolume Float
+  actualMeasured  Boolean @default(false)
+
+  waterSource      String
+  waterTemperature Float?
+  waterQuality     WaterQuality @default(CLEAN)
+
+  drinkingFrequency String?
+  drinkingDuration  Int?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([animalId])
+  @@index([date])
+}
+
+enum WaterQuality {
+  CLEAN
+  SLIGHTLY_DIRTY
+  DIRTY
+  CONTAMINATED
+}
+
+// ==================== BODY PART EXAMINATION ====================
+
+model BodyPartExamination {
+  id     String @id @default(cuid())
+  examId Int    @unique @default(autoincrement())
+
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  bodyPart BodyPart
+
+  condition   BodyPartCondition
+  abnormality String?
+  severity    Severity?
+
+  // For udder
+  udderQuarter UdderQuarter?
+  swelling     Boolean       @default(false)
+  heat         Boolean       @default(false)
+  hardness     Boolean       @default(false)
+
+  // For hooves/legs
+  leg          LegPosition?
+  lameSwelling Boolean        @default(false)
+  lameHeat     Boolean        @default(false)
+  lameness     LamenessScore?
+
+  // For eyes
+  discharge  Boolean @default(false)
+  cloudiness Boolean @default(false)
+
+  treatmentGiven String?
+
+  recordedBy     String
+  recordedByUser User   @relation("ExamRecordedBy", fields: [recordedBy], references: [id])
+
+  photos String[]
+  notes  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([animalId])
+  @@index([date])
+  @@index([bodyPart])
+}
+
+enum BodyPart {
+  UDDER
+  TEAT
+  HOOF_FRONT_LEFT
+  HOOF_FRONT_RIGHT
+  HOOF_REAR_LEFT
+  HOOF_REAR_RIGHT
+  LEG_FRONT_LEFT
+  LEG_FRONT_RIGHT
+  LEG_REAR_LEFT
+  LEG_REAR_RIGHT
+  EYE_LEFT
+  EYE_RIGHT
+  EAR_LEFT
+  EAR_RIGHT
+  TAIL
+  SKIN
+  TEETH
+  HORNS
+  OTHER
+}
+
+enum UdderQuarter {
+  FRONT_LEFT
+  FRONT_RIGHT
+  REAR_LEFT
+  REAR_RIGHT
+}
+
+enum LegPosition {
+  FRONT_LEFT
+  FRONT_RIGHT
+  REAR_LEFT
+  REAR_RIGHT
+}
+
+enum LamenessScore {
+  NORMAL
+  MILD
+  MODERATE
+  LAME
+  SEVERELY_LAME
+}
+
+enum BodyPartCondition {
+  NORMAL
+  ABNORMAL
+  INJURED
+  INFECTED
+  REQUIRES_ATTENTION
+}
+
+// ==================== HEALTH RECORDS ====================
+
+model HealthRecord {
+  id       String @id @default(cuid())
+  recordId Int    @unique @default(autoincrement())
+
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date       DateTime         @default(now())
+  recordType HealthRecordType
+
+  symptoms        String[]
+  temperature     Float?
+  heartRate       Int?
+  respirationRate Int?
+  diagnosis       String?  @db.Text
+  severity        Severity @default(MEDIUM)
+
+  treatment     String?  @db.Text
+  medications   String[]
+  dosages       String[]
+  treatmentCost Float?
+
+  vaccineName  String?
+  vaccineType  VaccineType?
+  vaccineBatch String?
+  nextDueDate  DateTime?
+
+  vetId          String?
+  vetName        String?
+  vetContact     String?
+  recordedBy     String
+  recordedByUser User    @relation("HealthRecordedBy", fields: [recordedBy], references: [id])
+
+  requiresFollowUp Boolean   @default(false)
+  followUpDate     DateTime?
+  followUpNotes    String?   @db.Text
+
+  outcome     TreatmentOutcome?
+  recoveredAt DateTime?
+
+  photos     String[]
+  labResults String[]
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([farmId])
+  @@index([animalId])
+  @@index([date])
+  @@index([recordType])
+  @@index([severity])
+}
+
+enum HealthRecordType {
+  VACCINATION
+  DEWORMING
+  CHECKUP
+  ILLNESS
+  INJURY
+  SURGERY
+  PREGNANCY_CHECK
+  HOOF_TRIMMING
+  DENTAL
+  CASTRATION
+  DEHORNING
+  OTHER
+}
+
+enum VaccineType {
+  FMD
+  ANTHRAX
+  BRUCELLOSIS
+  BLACKLEG
+  LSD
+  RABIES
+  ECF
+  CCPP
+  PPR
+  NEWCASTLE
+  GUMBORO
+  FOWL_POX
+  CUSTOM
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TreatmentOutcome {
+  RECOVERED
+  RECOVERING
+  NO_IMPROVEMENT
+  WORSENED
+  DECEASED
+  REFERRED
+}
+
+// ==================== VACCINATION SCHEDULE ====================
+
+model VaccinationSchedule {
+  id         String @id @default(cuid())
+  scheduleId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  vaccineName String
+  vaccineType VaccineType
+  description String?     @db.Text
+
+  animalCategory  AnimalCategory?
+  ageRange        String?
+  specificAnimals String[]
+
+  frequencyMonths Int
+  firstDoseAge    Int?
+  boosterSchedule String?
+
+  reminderDaysBefore Int @default(7)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([farmId])
+  @@index([vaccineType])
+}
+
+// ==================== HERD HEALTH SUMMARY ====================
+
+model HerdHealthSummary {
+  id        String @id @default(cuid())
+  summaryId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  animalCategory  AnimalCategory
+  groupIdentifier String
+  animalCount     Int
+  animalIds       String[]
+
+  averageHealthScore    Float
+  animalsUnderTreatment Int
+  newCasesSinceLast     Int
+  recoveredSinceLast    Int
+
+  prevalentSymptoms String[]
+  symptomsCount     Json
+
+  outbreakRisk Float
+  riskFactors  String[]
+
+  avgTemperature Float?
+  rainfall       Float?
+
+  avgMilkYield Float?
+  avgDailyGain Float?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([farmId])
+  @@index([date])
+  @@index([animalCategory])
+}
+
+// ==================== MILK QUALITY TEST ====================
+
+model MilkQualityTest {
+  id     String @id @default(cuid())
+  testId Int    @unique @default(autoincrement())
+
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  // Quality metrics
+  somaticCellCount  Int?
+  bacterialCount    Int?
+  fatPercentage     Float?
+  proteinPercentage Float?
+  lactosePercentage Float?
+  totalSolids       Float?
+  pH                Float?
+  freezingPoint     Float?
+
+  // Contaminants
+  antibioticResidues Boolean  @default(false)
+  otherContaminants  String[]
+
+  // Grading
+  grade MilkGrade
+  price Float?
+
+  // Testing details
+  testedBy       String?
+  testingMethod  String?
+  laboratoryName String?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([farmId])
+  @@index([animalId])
+  @@index([date])
+  @@index([grade])
+}
+
+enum MilkGrade {
+  GRADE_A
+  GRADE_B
+  GRADE_C
+  REJECTED
+}
+
+// ==================== WEIGHT TRACKING ====================
+
+model WeightRecord {
+  id       String @id @default(cuid())
+  recordId Int    @unique @default(autoincrement())
+
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date   DateTime @default(now())
+  weight Float
+
+  bodyConditionScore Float?
+  bodyConditionNotes String?
+
+  weightType WeightType @default(REGULAR)
+  isFasted   Boolean    @default(false)
+
+  weightGain        Float?
+  dailyGainRate     Float?
+  daysFromLastWeigh Int?
+
+  heartGirth Float?
+  bodyLength Float?
+  height     Float?
+
+  recordedBy     String
+  recordedByUser User   @relation("WeightRecordedBy", fields: [recordedBy], references: [id])
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([farmId])
+  @@index([animalId])
+  @@index([date])
+}
+
+enum WeightType {
+  BIRTH
+  PURCHASE
+  REGULAR
+  PRE_SALE
+  POST_TREATMENT
+  MARKET_READY
+}
+
+// ==================== PRODUCTION TRACKING ====================
+
+model ProductionRecord {
+  id       String @id @default(cuid())
+  recordId Int    @unique @default(autoincrement())
+
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  animalId String
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  productionType ProductionType
+
+  // For Milk
+  milkQuantity   Float?
+  milkQuality    MilkQuality?
+  milkFat        Float?
+  milkProtein    Float?
+  milkingTime    String?
+  milkingSession Int?
+
+  // For Eggs
+  eggCount  Int?
+  eggWeight Float?
+  eggGrade  String?
+
+  // For Wool/Fiber
+  woolWeight  Float?
+  woolQuality String?
+
+  // For Manure
+  manureQuantity Float?
+
+  // General
+  quantity Float?
+  unit     String?
+  quality  String?
+
+  // Revenue tracking
+  soldQuantity    Float?
+  pricePerUnit    Float?
+  totalRevenue    Float?
+  customerName    String?
+  customerContact String?
+
+  recordedBy     String
+  recordedByUser User   @relation("ProductionRecordedBy", fields: [recordedBy], references: [id])
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([farmId])
+  @@index([animalId])
+  @@index([date])
+  @@index([productionType])
+}
+
+enum ProductionType {
+  MILK
+  EGGS
+  WOOL
+  MANURE
+  OTHER
+}
+
+enum MilkQuality {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+  REJECTED
+}
+
+// ==================== BREEDING MANAGEMENT ====================
+
+model BreedingRecord {
+  id       String @id @default(cuid())
+  recordId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  motherId      String
+  mother        Animal  @relation("MotherAnimal", fields: [motherId], references: [id], onDelete: Cascade)
+  fatherId      String?
+  father        Animal? @relation("FatherAnimal", fields: [fatherId], references: [id], onDelete: SetNull)
+  fatherDetails String?
+
+  breedingDate   DateTime       @default(now())
+  breedingMethod BreedingMethod
+  breedingType   BreedingType
+
+  semenSource  String?
+  semenBatch   String?
+  aiTechnician String?
+  aiCost       Float?
+
+  heatObserved Boolean   @default(false)
+  heatDate     DateTime?
+  cycleNumber  Int?
+
+  isPregnant         Boolean   @default(false)
+  pregnancyConfirmed Boolean   @default(false)
+  confirmationDate   DateTime?
+  confirmationMethod String?
+  expectedDelivery   DateTime?
+  gestationPeriod    Int?
+
+  actualDelivery     DateTime?
+  deliveryType       DeliveryType?
+  deliveryDifficulty String?
+  offspringCount     Int?
+  offspringAlive     Int?
+  offspringDead      Int?
+  offspringIds       String[]
+
+  offspring Animal[] @relation("OffspringAnimal")
+
+  complications      String? @db.Text
+  assistanceRequired Boolean @default(false)
+  vetAssistance      Boolean @default(false)
+  vetName            String?
+
+  outcome BreedingOutcome?
+
+  motherCondition    String?
+  offspringCondition String?
+
+  recommendedNextBreeding DateTime?
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([farmId])
+  @@index([motherId])
+  @@index([fatherId])
+  @@index([breedingDate])
+}
+
+enum BreedingMethod {
+  NATURAL
+  AI
+  ET
+}
+
+enum BreedingType {
+  PURE
+  CROSSBREED
+  UPGRADED
+}
+
+enum DeliveryType {
+  NORMAL
+  ASSISTED
+  C_SECTION
+  STILLBORN
+}
+
+enum BreedingOutcome {
+  SUCCESSFUL
+  FAILED
+  MISCARRIAGE
+  STILLBORN
+  COMPLICATIONS
+}
+
+// ==================== REPRODUCTION SUMMARY ====================
+
+model ReproductionSummary {
+  id        String @id @default(cuid())
+  summaryId Int    @unique @default(autoincrement())
+
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  animalId String @unique
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  totalPregnancies     Int @default(0)
+  successfulDeliveries Int @default(0)
+  stillbirths          Int @default(0)
+  miscarriages         Int @default(0)
+
+  conceptionRate        Float?
+  calvingInterval       Int?
+  servicesPerConception Float?
+
+  lastHeatDate     DateTime?
+  lastBreedingDate DateTime?
+  lastDeliveryDate DateTime?
+  daysOpen         Int?
+
+  lifetimeMilkProduction Float?
+  lifetimeOffspring      Int    @default(0)
+
+  ageAtFirstHeat     Int?
+  ageAtFirstBreeding Int?
+  ageAtFirstCalving  Int?
+
+  isCurrentlyLactating   Boolean @default(false)
+  isCurrentlyPregnant    Boolean @default(false)
+  currentLactationNumber Int?
+
+  lastUpdated DateTime @default(now())
+
+  @@index([farmId])
+  @@index([animalId])
+}
+
+// ==================== SLAUGHTER/CARCASS RECORDS ====================
+
+model SlaughterRecord {
+  id       String @id @default(cuid())
+  recordId Int    @unique @default(autoincrement())
+
+  animalId String @unique
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  date DateTime @default(now())
+
+  liveWeight     Float
+  ageAtSlaughter Int
+
+  carcassWeight      Float
+  dressingPercentage Float
+
+  meatGrade MeatGrade
+  fatCover  Float?
+  marbling  MarblingScore?
+  meatColor String?
+  fatColor  String?
+
+  liverCondition  String?
+  lungCondition   String?
+  kidneyCondition String?
+  abnormalities   String[]
+
+  pricePerKg   Float
+  totalRevenue Float
+  buyerName    String?
+
+  totalFeedCost   Float
+  totalDaysOnFarm Int
+  profitMargin    Float
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([date])
+  @@index([meatGrade])
+}
+
+enum MeatGrade {
+  PRIME
+  CHOICE
+  SELECT
+  STANDARD
+  UTILITY
+}
+
+enum MarblingScore {
+  ABUNDANT
+  MODERATE
+  MODEST
+  SMALL
+  SLIGHT
+  TRACES
+}
+
+// ==================== MORTALITY RECORDS ====================
+
+model MortalityRecord {
+  id       String @id @default(cuid())
+  recordId Int    @unique @default(autoincrement())
+
+  farmId   String
+  farm     Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  animalId String @unique
+
+  date DateTime @default(now())
+
+  ageAtDeath    Int
+  weightAtDeath Float?
+
+  location       String
+  timeOfDay      String?
+  witnessPresent Boolean @default(false)
+
+  suspectedCause  MortalityCause
+  symptoms        String[]
+  illnessDuration String?
+
+  postMortemDone    Boolean @default(false)
+  confirmedCause    String?
+  pathologyFindings String? @db.Text
+
+  hadRecentIllness  Boolean   @default(false)
+  lastTreatment     String?
+  lastTreatmentDate DateTime?
+
+  weatherConditions String?
+  feedChanges       String?
+  stressFactors     String[]
+
+  animalValue    Float
+  treatmentCosts Float?
+  totalLoss      Float
+
+  preventableDeath Boolean?
+  lessonsLearned   String?  @db.Text
+  preventionSteps  String[]
+
+  photos    String[]
+  vetReport String?
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([farmId])
+  @@index([date])
+  @@index([suspectedCause])
+}
+
+enum MortalityCause {
+  DISEASE_INFECTIOUS
+  DISEASE_METABOLIC
+  DISEASE_RESPIRATORY
+  DISEASE_DIGESTIVE
+  PARASITES
+  PREDATOR_ATTACK
+  INJURY_ACCIDENT
+  DYSTOCIA
+  POISONING
+  HEAT_STRESS
+  COLD_STRESS
+  UNKNOWN
+  OTHER
+}
+
+// ==================== INVENTORY MANAGEMENT ====================
+
+model FeedInventory {
+  id String @id @default(cuid())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  feedName     String
+  feedType     FeedType
+  currentStock Float
+  unit         FeedUnit
+
+  reorderLevel Float
+  costPerUnit  Float?
+  supplier     String?
+
+  lastRestocked DateTime?
+  expiryDate    DateTime?
+
+  proteinContent Float?
+  energyContent  Float?
+  fiberContent   Float?
+
+  status InventoryStatus @default(IN_STOCK)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([farmId])
+  @@index([status])
+}
+
+enum FeedType {
+  CONCENTRATE
+  ROUGHAGE
+  PASTURE
+  MINERALS
+  WATER
+  MIXED
+}
+
+enum FeedUnit {
+  KG
+  LITERS
+  BALES
+  BAGS
+  BUNDLES
+}
+
+// ==================== FEED QUALITY TESTING ====================
+
+model FeedQualityTest {
+  id     String @id @default(cuid())
+  testId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  feedName    String
+  feedType    FeedType
+  batchNumber String?
+
+  date DateTime @default(now())
+
+  dryMatter         Float?
+  crudeProtein      Float?
+  crudeFiber        Float?
+  energyContent     Float?
+  calciumContent    Float?
+  phosphorusContent Float?
+
+  moistureContent Float?
+  moldPresent     Boolean @default(false)
+  dustLevel       String?
+  color           String?
+  smell           String?
+
+  grassMaturity   String?
+  leafToStemRatio Float?
+
+  aflatoxins  Boolean @default(false)
+  pesticides  Boolean @default(false)
+  heavyMetals Boolean @default(false)
+
+  testedBy       String?
+  laboratoryName String?
+  testCost       Float?
+
+  approved Boolean @default(true)
+  notes    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([farmId])
+  @@index([date])
+  @@index([feedName])
+}
+
+model MedicineInventory {
+  id String @id @default(cuid())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  medicineName String
+  medicineType String
+  currentStock Float
+  unit         String
+
+  batchNumber  String?
+  manufacturer String?
+  expiryDate   DateTime?
+
+  reorderLevel Float
+  costPerUnit  Float?
+  supplier     String?
+
+  requiresPrescription Boolean @default(false)
+  meatWithdrawal       Int?
+  milkWithdrawal       Int?
+
+  status InventoryStatus @default(IN_STOCK)
+
+  lastRestocked DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([farmId])
+  @@index([expiryDate])
+  @@index([status])
+}
+
+enum InventoryStatus {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
+  EXPIRED
+}
+
+// ==================== FINANCIAL MANAGEMENT ====================
+
+model FinancialTransaction {
+  id            String @id @default(cuid())
+  transactionId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  date DateTime        @default(now())
+  type TransactionType
+
+  category    FinancialCategory
+  subcategory String?
+
+  amount   Float
+  currency String @default("UGX")
+
+  animalId    String?
+  description String  @db.Text
+
+  revenueSource String?
+  buyerName     String?
+  buyerContact  String?
+
+  supplier        String?
+  supplierContact String?
+  invoiceNumber   String?
+  receiptNumber   String?
+  receiptUrl      String?
+
+  paymentMethod PaymentMethod?
+  paidTo        String?
+  paidBy        String?
+
+  status TransactionStatus @default(COMPLETED)
+
+  isTaxDeductible Boolean @default(false)
+  taxAmount       Float?
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([farmId])
+  @@index([date])
+  @@index([type])
+  @@index([category])
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum FinancialCategory {
+  ANIMAL_SALES
+  MILK_SALES
+  EGG_SALES
+  MANURE_SALES
+  BREEDING_FEES
+  OTHER_INCOME
+
+  FEED_PURCHASE
+  MEDICINE_PURCHASE
+  VETERINARY_FEES
+  ANIMAL_PURCHASE
+  EQUIPMENT
+  LABOR
+  UTILITIES
+  TRANSPORT
+  MAINTENANCE
+  INSURANCE
+  TAXES
+  OTHER_EXPENSE
+}
+
+enum PaymentMethod {
+  CASH
+  MOBILE_MONEY
+  BANK_TRANSFER
+  CHEQUE
+  CREDIT
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+// ==================== TASK MANAGEMENT ====================
+
+model Task {
+  id     String @id @default(cuid())
+  taskId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?  @db.Text
+  taskType    TaskType
+
+  assignedToId String?
+  assignedTo   User?   @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
+
+  animalIds  String[]
+  paddockIds String[]
+
+  dueDate     DateTime
+  dueTime     String?
+  isRecurring Boolean   @default(false)
+  recurrence  String?
+  nextDueDate DateTime?
+
+  priority TaskPriority @default(MEDIUM)
+  status   TaskStatus   @default(PENDING)
+
+  completedAt   DateTime?
+  completedById String?
+  completedBy   User?     @relation("TaskCompletedBy", fields: [completedById], references: [id])
+
+  reminderSent Boolean @default(false)
+  reminderTime String?
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([farmId])
+  @@index([assignedToId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+enum TaskType {
+  FEEDING
+  VACCINATION
+  DEWORMING
+  WEIGHING
+  HEALTH_CHECK
+  HOOF_TRIMMING
+  MILKING
+  PADDOCK_ROTATION
+  BREEDING
+  PREGNANCY_CHECK
+  CLEANING
+  EQUIPMENT_MAINTENANCE
+  GENERAL
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+// ==================== ALERTS & NOTIFICATIONS ====================
+
+model Alert {
+  id      String @id @default(cuid())
+  alertId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  type     AlertType
+  severity AlertSeverity @default(INFO)
+
+  title   String
+  message String @db.Text
+
+  animalId String?
+  taskId   String?
+
+  isAiGenerated Boolean @default(false)
+  aiConfidence  Float?
+
+  recipientIds String[]
+
+  status         AlertStatus @default(ACTIVE)
+  acknowledgedAt DateTime?
+  acknowledgedBy String?
+  resolvedAt     DateTime?
+  resolvedBy     String?
+
+  actionRequired Boolean @default(false)
+  actionTaken    String? @db.Text
+
+  sentViaEmail Boolean @default(false)
+  sentViaSms   Boolean @default(false)
+  sentViaApp   Boolean @default(true)
+
+  expiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User?    @relation(fields: [userId], references: [id])
+  userId    String?
+
+  @@index([farmId])
+  @@index([type])
+  @@index([severity])
+  @@index([status])
+}
+
+enum AlertType {
+  ANIMAL_SICK
+  DISEASE_OUTBREAK_RISK
+  VACCINATION_DUE
+  DEWORMING_DUE
+  HEALTH_CHECKUP_DUE
+  TREATMENT_FOLLOW_UP
+
+  WEIGHT_LOSS
+  POOR_GROWTH
+  MARKET_READY
+
+  HEAT_DETECTED
+  PREGNANCY_CHECK_DUE
+  DELIVERY_APPROACHING
+  POST_DELIVERY_CHECK
+
+  FEED_LOW_STOCK
+  WATER_SHORTAGE
+  PADDOCK_REST_COMPLETE
+
+  MEDICINE_EXPIRING
+  MEDICINE_LOW_STOCK
+  FEED_EXPIRING
+
+  TASK_OVERDUE
+  TASK_DUE_SOON
+
+  LOW_PROFIT_MARGIN
+  HIGH_EXPENSE_ALERT
+  PAYMENT_DUE
+
+  SYSTEM_ANNOUNCEMENT
+  AI_INSIGHT
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+  URGENT
+}
+
+enum AlertStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+}
+
+// ==================== AI INSIGHTS ====================
+
+model AIInsight {
+  id        String @id @default(cuid())
+  insightId Int    @unique @default(autoincrement())
+
+  farmId String
+  farm   Farm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  insightType    InsightType
+  title          String
+  description    String      @db.Text
+  recommendation String?     @db.Text
+
+  predictionType String?
+  confidence     Float
+
+  dataPoints     Int?
+  analysisMethod String?
+
+  animalIds     String[]
+  affectedCount Int?
+
+  currentValue   Float?
+  predictedValue Float?
+  expectedDate   DateTime?
+
+  potentialImpact  String?
+  estimatedCost    Float?
+  estimatedBenefit Float?
+
+  suggestedActions String[] @db.Text
+
+  status        InsightStatus @default(ACTIVE)
+  implementedAt DateTime?
+  outcome       String?       @db.Text
+
+  modelVersion String?
+  generatedBy  String?
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+
+  @@index([farmId])
+  @@index([insightType])
+  @@index([status])
+}
+
+enum InsightType {
+  DISEASE_PREDICTION
+  GROWTH_ANALYSIS
+  FEEDING_OPTIMIZATION
+  BREEDING_RECOMMENDATION
+  MARKET_TIMING
+  COST_REDUCTION
+  PRODUCTIVITY_IMPROVEMENT
+  HEALTH_TREND
+  FINANCIAL_FORECAST
+  ANOMALY_DETECTION
+}
+
+enum InsightStatus {
+  ACTIVE
+  VIEWED
+  IMPLEMENTED
+  DISMISSED
+  EXPIRED
+}
+
+// ==================== NOTIFICATIONS ====================
+
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type    NotificationType
+  title   String
+  message String           @db.Text
+
+  farmId   String?
+  animalId String?
+  taskId   String?
+  alertId  String?
+
+  data Json?
+
+  actionUrl  String?
+  actionText String?
+
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  sentViaEmail Boolean @default(false)
+  sentViaSms   Boolean @default(false)
+  sentViaApp   Boolean @default(true)
+
+  priority NotificationPriority @default(NORMAL)
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([type])
+}
+
+enum NotificationType {
+  ANIMAL_ADDED
+  ANIMAL_SOLD
+  ANIMAL_DECEASED
+  ANIMAL_SICK
+  ANIMAL_RECOVERED
+
+  VACCINATION_DUE
+  VACCINATION_COMPLETED
+  TREATMENT_STARTED
+  TREATMENT_COMPLETED
+
+  BREEDING_RECORDED
+  PREGNANCY_CONFIRMED
+  DELIVERY_APPROACHING
+  OFFSPRING_BORN
+
+  TASK_ASSIGNED
+  TASK_DUE
+  TASK_COMPLETED
+  TASK_OVERDUE
+
+  CRITICAL_ALERT
+  WARNING_ALERT
+  INFO_ALERT
+
+  AI_RECOMMENDATION
+  AI_PREDICTION
+  AI_ALERT
+
+  LOW_BALANCE
+  EXPENSE_RECORDED
+  INCOME_RECORDED
+
+  MEMBER_JOINED
+  MEMBER_LEFT
+  PERMISSION_CHANGED
+
+  SYSTEM_UPDATE
+  FEATURE_ANNOUNCEMENT
+}
+
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+// ==================== ACTIVITY LOGGING ====================
+
+model ActivityLog {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  farmId String?
+
+  action     String
+  module     String?
+  entityType String?
+  entityId   String?
+  status     String?
+
+  description String? @db.Text
+  metadata    Json?
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([farmId])
+  @@index([action])
+  @@index([module])
+}
+
+// ==================== SYSTEM SETTINGS ====================
+
+model SystemSetting {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  value       String  @db.Text
+  description String?
+  category    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+}
