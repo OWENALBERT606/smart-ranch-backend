@@ -1,7 +1,6 @@
 require("dotenv").config();
 
 import express from "express";
-import userRouter from "./routes/users";
 import authRouter from "./routes/auth";
 import farmRouter from "./routes/farms";
 import farmMemberRouter from "./routes/member";
@@ -19,7 +18,7 @@ app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`); 
 });
 
-app.use("/api/v1", userRouter); 
+// app.use("/api/v1", userRouter); 
 app.use("/api/v1/auth",authRouter);
 app.use("/api/v1/farms",farmRouter);
 app.use("/api/v1/farms", farmMemberRouter);
