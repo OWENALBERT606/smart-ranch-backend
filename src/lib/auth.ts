@@ -5,6 +5,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
 export interface TokenPayload {
+  id: string;          // 👈 ADD THIS
   userId: string;
   email: string;
   role: string;
